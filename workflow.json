@@ -1,0 +1,101 @@
+{
+  "name": "Invoice Parser Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "filters": { "q": "has:attachment filename:pdf subject:faktura OR subject:invoice" }
+      },
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "position": [240, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": { "id": "YOUR_GOOGLE_CREDENTIAL_ID", "name": "Google account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer YOUR_GROQ_API_KEY" }]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "=application/json",
+        "body": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\"role\": \"system\", \"content\": \"Extract invoice data and reply ONLY in this JSON format, no extra text:\\n{\\\"vendor\\\": \\\"\\\", \\\"invoice_no\\\": \\\"\\\", \\\"date\\\": \\\"\\\", \\\"amount\\\": \\\"\\\", \\\"vat\\\": \\\"\\\", \\\"currency\\\": \\\"\\\"}\\n\\nIf a field is missing write null.\"},\n    {\"role\": \"user\", \"content\": \"{{ $json.snippet }}\"}\n  ]\n}",
+        "options": {}
+      },
+      "name": "Groq AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "typeVersion": 4.4
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.all()[0].json.choices[0].message.content;\nlet invoice = {};\ntry {\n  invoice = JSON.parse(raw);\n} catch(e) {\n  invoice = { vendor: 'parse error', invoice_no: '', date: '', amount: '', vat: '', currency: '' };\n}\n\nreturn [{\n  json: {\n    date: invoice.date || new Date().toLocaleDateString('pl'),\n    vendor: invoice.vendor || 'unknown',\n    invoice_no: invoice.invoice_no || '',\n    amount: invoice.amount || '',\n    vat: invoice.vat || '',\n    currency: invoice.currency || 'PLN',\n    status: 'parsed ✅'\n  }\n}];"
+      },
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "position": [720, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "YOUR_GOOGLE_SHEET_ID" },
+        "sheetName": { "__rl": true, "value": "gid=0", "mode": "list", "cachedResultName": "Invoices" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Vendor": "={{ $json.vendor }}",
+            "Invoice No": "={{ $json.invoice_no }}",
+            "Amount": "={{ $json.amount }}",
+            "VAT": "={{ $json.vat }}",
+            "Currency": "={{ $json.currency }}",
+            "Status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "typeVersion": 4.7,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "YOUR_GOOGLE_CREDENTIAL_ID", "name": "Google Sheets OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🧾 New Invoice Parsed!\n\nVendor: {{ $('Code in JavaScript').first().json.vendor }}\nInvoice No: {{ $('Code in JavaScript').first().json.invoice_no }}\nAmount: {{ $('Code in JavaScript').first().json.amount }} {{ $('Code in JavaScript').first().json.currency }}\nVAT: {{ $('Code in JavaScript').first().json.vat }}\nDate: {{ $('Code in JavaScript').first().json.date }}\nStatus: {{ $('Code in JavaScript').first().json.status }}",
+        "additionalFields": {}
+      },
+      "name": "Notify Accountant",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1200, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram account" }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": { "main": [[{ "node": "Groq AI", "type": "main", "index": 0 }]] },
+    "Groq AI": { "main": [[{ "node": "Code in JavaScript", "type": "main", "index": 0 }]] },
+    "Code in JavaScript": { "main": [[{ "node": "Save to Sheets", "type": "main", "index": 0 }]] },
+    "Save to Sheets": { "main": [[{ "node": "Notify Accountant", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}
